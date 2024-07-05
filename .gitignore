@@ -1,0 +1,9 @@
+datasets
+datasets_for_models
+Drain_result
+generated_logs
+models/parameter/trained_tokenizer
+parameter_logs/generated_logs
+results
+venv_log_generator
+ExtrernalLibraries
