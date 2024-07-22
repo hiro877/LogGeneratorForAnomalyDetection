@@ -69,10 +69,11 @@ class MaskedTextDataset(Dataset):
     """
     Dataset class for masked text.
     """
-    def __init__(self, file_path, tokenizer, use_proposed_method, max_len=512):
+    def __init__(self, file_path, tokenizer, use_proposed_method, learn_positinal_info=True, max_len=512):
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.use_proposed_method = use_proposed_method
+        self.learn_positinal_info = learn_positinal_info
         with open(file_path, 'r', encoding='utf-8') as file:
             self.texts = [line.strip() for line in file.readlines()]
 
@@ -111,9 +112,12 @@ class MaskedTextDataset(Dataset):
         filtered_tokens = [tokens[i] for i in range(1, len(tokens) - 1) if i not in masked_token_indexes]
         # Calculate the sum of the filtered tokens
         total_sum = sum(filtered_tokens)
-
-        tokens.insert(-1, self.tokenizer.token_to_id("[MASK]"))
-        labels.insert(-1, total_sum)
+        if self.learn_positinal_info:
+            tokens.insert(-1, self.tokenizer.token_to_id("[MASK]"))
+            labels.insert(-1, total_sum)
+        else:
+            tokens.insert(-1, total_sum)
+            labels.insert(-1, -100)
         return tokens, labels
 
 class MaskedTextTestDataset(Dataset):
@@ -205,11 +209,12 @@ class ModelTester:
     """
     A class to handle model testing and evaluation.
     """
-    def __init__(self, model, tokenizer, data_loader, device):
+    def __init__(self, model, tokenizer, data_loader, device, is_analyzing=False):
         self.model = model
         self.tokenizer = tokenizer
         self.data_loader = data_loader
         self.device = device
+        self.is_analyzing = is_analyzing
         self.anomaly_calculator = AnomalyCalculator(tokenizer)
 
     def load_model(self, path, config):
@@ -246,7 +251,8 @@ class ModelTester:
                     label = 0 if label == "-" else 1
                     label_list.append(label)
 
-                    # self.analyze_predictions(pred, label, score, text, predictions, mask_index, param_state, masked_param, thre_AD)
+                    if self.is_analyzing:
+                        self.analyze_predictions(pred, label, score, text, predictions, mask_index, param_state, masked_param, thre_AD)
                     # if pred != label:
                     #     mask_position = mask_index
                     #     # print(mask_position)
@@ -273,8 +279,12 @@ class ModelTester:
         cm = confusion_matrix(label_list, pred_list)
         tn, fp, fn, tp = cm.flatten()
 
+        false_alarm_rate = fp / (fp + tn) if (fp + tn) != 0 else 0
+        underreport_rate = fn / (fn + tp) if (fn + tp) != 0 else 0
         eval_results = {
             "f1": f1,
+            "false_alarm_rate": false_alarm_rate,
+            "underreport_rate": underreport_rate,
             "rc": recall,
             "pc": precision,
             "acc": accuracy,
@@ -296,9 +306,86 @@ class ModelTester:
     #     return tokens
 
     def analyze_predictions(self, pred, label, score, text, predictions, mask_position, param_state, masked_param, thre_AD):
+        # print(param_state)
+        if param_state == "State":
+            self.analyze_state(pred, label, score, text, predictions, mask_position, param_state, masked_param, thre_AD)
+        elif param_state == "Value":
+            self.analyze_value(pred, label, score, text, predictions, mask_position, param_state, masked_param, thre_AD)
+        # elif param_state == "Info":
+        #     break
+        #
+        # param_type = ["A", "B", "C"]
+        # pt_i = 0
+        # if pred == label and text[6] == param_type[pt_i] and label==0:
+        #     print("text", text, text[6])
+        #     # print("encoded_input", encoded_input)
+        #     print("predictions", predictions.shape)
+        #
+        #     id_best = predictions[0, mask_position].argmax(-1).item()
+        #     token_best = self.tokenizer.id_to_token(id_best)
+        #     # if token_best is None: return
+        #     token_best = token_best.replace("##", "")
+        #     text = text.replace("[MASK]", token_best)
+        #
+        #     print_color("[Miss]: pred={}, label={}, score={}".format(pred, label, score))
+        #     print("text={}, token_best={}, masked_param={}".format(text, token_best, masked_param))
+        #     self.anomaly_calculator.calc_anomaly(param_state, masked_param.lower(), predictions, mask_position, True)
+        #     print("=" * 20)
+        #     """ ============================================== """
+        #     all_probability = 0
+        #     prob_list = []
+        #     for ind in range(10001):
+        #         encoding = self.tokenizer.encode(str(ind), add_special_tokens=False)
+        #         info_b_token_id = encoding.ids[0]  # .ids でIDのリストを取得し、その最初の要素を選択
+        #         probability = torch.nn.functional.softmax(predictions[0, mask_position], dim=-1)[info_b_token_id].item()
+        #         print("{} {}".format(ind, format(probability, ".20f")))
+        #         all_probability += probability
+        #         prob_list.append(probability)
+        #
+        #     self.save_prob(prob_list, [80, 2500], thre_AD, "result{}.png".format(param_type[pt_i]))
+        #     print(1 / 12380)
+        #     per1 = 1 / 12380
+        #     print(format(per1, ".20f"))
+        #     print(format(30 * per1, ".20f"))
+        #     print("all_probability {}".format(all_probability))
+        #     sys.exit()
+    def analyze_state(self, pred, label, score, text, predictions, mask_position, param_state, masked_param, thre_AD):
         param_type = ["A", "B", "C"]
-        pt_i = 1
-        if pred == label and text[6] == param_type[pt_i] and label==0:
+        pt_i = 0
+        if pred != label:
+            print("text", text, masked_param)
+            # print("predictions", predictions.shape)
+
+            id_best = predictions[0, mask_position].argmax(-1).item()
+            token_best = self.tokenizer.id_to_token(id_best)
+            token_best = token_best.replace("##", "")
+            text = text.replace("[MASK]", token_best)
+
+            # print_color("[Miss]: pred={}, label={}, score={}".format(pred, label, score))
+            # print("text={}, token_best={}, masked_param={}".format(text, token_best, masked_param))
+            # print("=" * 20)
+            """ ============================================== """
+            all_probability = 0
+            prob_list = []
+            vocab_size_ = self.tokenizer.get_vocab_size()
+            for token_id in range(vocab_size_):
+                probability = torch.nn.functional.softmax(predictions[0, mask_position], dim=-1)[token_id].item()
+                # print("token_id={} probability={}".format(token_id, format(probability, ".20f")))
+                all_probability += probability
+                prob_list.append(probability)
+
+            # self.save_prob_state(prob_list, [0, vocab_size_], thre_AD, "result{}.png".format(param_type[pt_i]))
+            # print("vocab_size_: ", vocab_size_, "1/vocab_size_ = ", 1 / vocab_size_)
+            # per1 = 1 / vocab_size_
+            # print(format(per1, ".20f"))
+            # print("all_probability {}".format(all_probability))
+            # sys.exit()
+
+
+    def analyze_value(self, pred, label, score, text, predictions, mask_position, param_state, masked_param, thre_AD):
+        param_type = ["A", "B", "C"]
+        pt_i = 0
+        if pred == label and text[6] == param_type[pt_i] and label == 0:
             print("text", text, text[6])
             # print("encoded_input", encoded_input)
             print("predictions", predictions.shape)
@@ -323,6 +410,7 @@ class ModelTester:
                 print("{} {}".format(ind, format(probability, ".20f")))
                 all_probability += probability
                 prob_list.append(probability)
+                sys.exit()
 
             self.save_prob(prob_list, [80, 2500], thre_AD, "result{}.png".format(param_type[pt_i]))
             print(1 / 12380)
@@ -330,7 +418,6 @@ class ModelTester:
             print(format(per1, ".20f"))
             print(format(30 * per1, ".20f"))
             print("all_probability {}".format(all_probability))
-            sys.exit()
 
     def save_prob(self, probabilities, sub_x_datas, sub_y, save_path):
         # X軸のデータ（インデックス）
@@ -346,6 +433,30 @@ class ModelTester:
         plt.axvline(x=500, color='g', linestyle='-', linewidth=2, label="x={}".format(500))
         plt.axvline(x=1500, color='g', linestyle='--', linewidth=2, label="x={}".format(1500))
         plt.axhline(y=sub_y, color='blue', linestyle='--', label="y={}".format(sub_y))
+
+        plt.legend(fontsize=14)
+
+        plt.title('Prediction Scores', fontsize=20)
+        plt.xlabel('Value', fontsize=16)
+        plt.ylabel('Prediction Score', fontsize=16)
+        plt.tick_params(axis='both', labelsize=14)  # X軸とY軸両方の目盛りラベルのサイズを12に設定
+
+        plt.savefig(save_path)
+
+    def save_prob_state(self, probabilities, sub_x_datas, sub_y, save_path):
+        # X軸のデータ（インデックス）
+        x_data = list(range(1, len(probabilities) + 1))
+
+        # 散布図をプロット
+        plt.figure(figsize=(10, 6))
+        plt.scatter(x_data, probabilities, alpha=0.5)
+        # for x_value in sub_x_datas:
+        plt.axvline(x=sub_x_datas[0], color='r', linestyle='-', linewidth=2, label="x={}".format(sub_x_datas[0]))
+        plt.axvline(x=sub_x_datas[1], color='r', linestyle='--', linewidth=2, label="x={}".format(sub_x_datas[1]))
+
+        # plt.axvline(x=500, color='g', linestyle='-', linewidth=2, label="x={}".format(500))
+        # plt.axvline(x=1500, color='g', linestyle='--', linewidth=2, label="x={}".format(1500))
+        # plt.axhline(y=sub_y, color='blue', linestyle='--', label="y={}".format(sub_y))
 
         plt.legend(fontsize=14)
 

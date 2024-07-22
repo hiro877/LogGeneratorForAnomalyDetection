@@ -35,28 +35,42 @@ python main_param_ad.py --epochs 50 --vocab_size 20000 --train_data_num 10000 --
 
 """
 
+"""
+python main_param_ad.py --config configurations/config.json
+"""
+
 def load_config(config_file):
     with open(config_file, 'r') as file:
         config = json.load(file)
     return config
 
+
+import os
+
+
 def list_file_paths(directory):
     """
-    指定されたディレクトリ内のすべてのファイルのパスをリストとして返す関数。
+    指定されたディレクトリ内のすべての.pthファイルのパスをリストとして返す関数。
+
     Args:
     directory (str): ファイルパスを取得するディレクトリのパス。
 
     Returns:
-    list: ディレクトリ内のすべてのファイルのフルパスのリスト。
+    list: ディレクトリ内のすべての.pthファイルのフルパスのリスト。
     """
+    # .pthファイルのパスを格納するためのリスト
+    pth_file_paths = []
+
     # ディレクトリ内のすべてのファイルとフォルダを取得
-    file_paths = []  # ファイルのパスを格納するためのリスト
     for root, dirs, files in os.walk(directory):
         for file in files:
-            # ファイルのフルパスをリストに追加
-            file_paths.append(os.path.join(root, file))
-    file_paths.sort()
-    return file_paths
+            # .pthファイルのみをリストに追加
+            if file.endswith('.pth'):
+                pth_file_paths.append(os.path.join(root, file))
+
+    pth_file_paths.sort()
+    return pth_file_paths
+
 
 def extract_sort_keys_precise(file_path):
     parts = file_path.split('/')
@@ -101,15 +115,17 @@ def test(params):
     # eval_results = tester.test(params["param_state"], params["thre_AD"], "results/miss_result.txt")
     # print("Evaluation Results:", eval_results)
 
-    filename = "RESULTS_TEST_Value_ISSRE2024.txt"
+    # filename = "RESULTS_TEST_Value_CognitiveRobotics.txt"
+    filename = "RESULTS_TEST_PCDS2024.txt"
     results_file_path = "results/" + filename
     command_line_string = " ".join(sys.argv)
     with open(results_file_path, "a+") as fw:
         fw.write("\n" + "==========\n" + command_line_string + "\n\n")
         file_num=1
         for model_path in saved_model_files:
-            if model_path != "saved_models/improved_method/20000/data_num_100000/50.pth":
-                continue
+            if params["is_analyzing"]:
+                if model_path != "saved_models/exp3/0050.pth":
+                    continue
             print("Evaluste file={}".format(model_path))
             tester.load_model(model_path, config)
 
@@ -119,7 +135,7 @@ def test(params):
             # eval_results = test(model, data_loader, device, params["param_state"], params["thre_AD"])
             eval_results = tester.test(params["param_state"], params["thre_AD"], "results/miss_result.txt")
 
-            result = f"{eval_results['f1']} {eval_results['rc']} {eval_results['pc']} {eval_results['acc']} " \
+            result = f"{eval_results['f1']} {eval_results['false_alarm_rate']} {eval_results['underreport_rate']} {eval_results['rc']} {eval_results['pc']} {eval_results['acc']} " \
                    f"{eval_results['tn']} {eval_results['fp']} {eval_results['fn']} {eval_results['tp']}"
 
 
@@ -133,19 +149,6 @@ def test(params):
 
 
 def main():
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("--epochs", default=1, type=int)
-    # parser.add_argument("--batch_size", default=16, type=int)
-    # parser.add_argument("--learning_rate", default=5e-5, type=float)
-    # parser.add_argument("--vocab_size", default=100, type=str)
-    # parser.add_argument("--train_data_num", default=10000, type=int)
-    # parser.add_argument("--param_state", default='State', type=str)
-    # parser.add_argument("--thre_AD", default=0.05, type=float)
-    # parser.add_argument("--saved_model_dir", default="saved_models", type=str)
-    # parser.add_argument("--load_model_path", default=None, type=str)
-    # parser.add_argument("--only_test", action='store_true')
-    # parser.add_argument("--use_proposed_method", action='store_true')
-    # params = vars(parser.parse_args())
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.json", type=str, help="Path to the configuration file")
@@ -169,12 +172,12 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    sys.exit()
+    # sys.exit()
     model = BertForMaskedLM(config).to(device)
     optimizer = AdamW(model.parameters(), lr=params["learning_rate"])
 
     train_data_path = f"datasets_for_models/sample_param/train/dataset_train_{params['train_data_num']}.txt"
-    train_dataset = MaskedTextDataset(train_data_path, tokenizer, params["use_proposed_method"])
+    train_dataset = MaskedTextDataset(train_data_path, tokenizer, params["use_proposed_method"], params["learn_positinal_info"])
     train_loader = DataLoader(train_dataset, batch_size=params["batch_size"], shuffle=True, collate_fn=DataHandler.collate_batch)
 
     test_data_path = f"datasets_for_models/sample_param/test/dataset_test_{params['param_state'].lower()}.txt"

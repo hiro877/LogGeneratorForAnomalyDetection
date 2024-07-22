@@ -1,5 +1,22 @@
-LogGeneratorForAnomalyDetection
+# PCDS2024
+使用したデータセットは以下から取得できます。
+https://drive.google.com/file/d/1ucR8i7xQrfD5FzdQrprQT-ode2P8m4Ab/view?usp=sharing
 
+## 実行順序
+論文中の提案手法Exp1~3は次のスクリプトから実行します。
+- Train
+configration/exp1.jsonのonly_testをfalseに設定する
+python main_param_ad.py --config configurations/exp1.json 
+- Test
+configration/exp1.jsonのonly_testをtrueに設定する
+python main_param_ad.py --config configurations/exp1.json 
+
+比較手法は次のスクリプトから実行します。
+python compatitive_unsupervised_main.py  --model_type isolationforest --train_file train_data.txt --test_file test_data.txt --tokenizer_file path_to_tokenizer_file --batch_size 256
+
+
+# Under Construction For Future
+LogGeneratorForAnomalyDetection
 
 このプロジェクトはテキストログを用いた異常検知の研究領域に不足している
 データセットを自動生成するツールを作成するプロジェクトです。
